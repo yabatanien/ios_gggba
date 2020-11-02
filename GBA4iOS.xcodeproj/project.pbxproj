@@ -125,7 +125,6 @@
 		BF2F35C2183FF6F9002ACE90 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2D57031798F2EC00C616EB /* UIKit.framework */; };
 		BF2F35C3183FF6F9002ACE90 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2D56FF1798F2EC00C616EB /* Foundation.framework */; };
 		BF2F35C7183FF6F9002ACE90 /* Emulation.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CC2D57111798F2EC00C616EB /* Emulation.storyboard */; };
-		BF2F35C8183FF6F9002ACE90 /* Default.gbaskin in Resources */ = {isa = PBXBuildFile; fileRef = BFFA355117ECD2A70038D34F /* Default.gbaskin */; };
 		BF2F35C9183FF6F9002ACE90 /* xButton.png in Resources */ = {isa = PBXBuildFile; fileRef = CC15E53C179ECDCC00449972 /* xButton.png */; };
 		BF2F35CA183FF6F9002ACE90 /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CC2D571A1798F2EC00C616EB /* Images.xcassets */; };
 		BF2F35CB183FF6F9002ACE90 /* padButton.png in Resources */ = {isa = PBXBuildFile; fileRef = CC41AEA917A22EC90062DDD8 /* padButton.png */; };
@@ -738,7 +737,6 @@
 		BFF70ED719BE667900009DAF /* GBAControllerSkinImageResponseSerializer.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GBAControllerSkinImageResponseSerializer.h; sourceTree = "<group>"; };
 		BFF70ED819BE667900009DAF /* GBAControllerSkinImageResponseSerializer.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GBAControllerSkinImageResponseSerializer.m; sourceTree = "<group>"; };
 		BFF7615119E731D800C403A0 /* libPods.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libPods.a; path = "Pods/build/Debug-iphoneos/libPods.a"; sourceTree = "<group>"; };
-		BFFA355117ECD2A70038D34F /* Default.gbaskin */ = {isa = PBXFileReference; lastKnownFileType = file; name = Default.gbaskin; path = Skins/Default/GBA/Purple/Default.gbaskin; sourceTree = SOURCE_ROOT; };
 		BFFBCCD41850505A005187DF /* GBASyncAllFilesOperation.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = GBASyncAllFilesOperation.h; sourceTree = "<group>"; };
 		BFFBCCD51850505A005187DF /* GBASyncAllFilesOperation.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = GBASyncAllFilesOperation.mm; sourceTree = "<group>"; };
 		BFFBCCD818505CB9005187DF /* GBASyncMultipleFilesOperation.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = GBASyncMultipleFilesOperation.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 0; wrapsLines = 1; };
@@ -1721,7 +1719,6 @@
 				CC2D571A1798F2EC00C616EB /* Images.xcassets */,
 				BF0EBB1019C026E500703623 /* Launch Screen.xib */,
 				BF563AB4184B11C000722678 /* Launch Images */,
-				BFFA355117ECD2A70038D34F /* Default.gbaskin */,
 				CC5044E61814C474009F7B9E /* Default.gbcskin */,
 				CC41AEA917A22EC90062DDD8 /* padButton.png */,
 				1A5BAE7E17D04B0A00BABC01 /* overlays128.png */,
@@ -2178,7 +2175,6 @@
 				BFB89E4418909EE8002E5F26 /* Default-Portrait@2x~ipad.png in Resources */,
 				BF2F35C7183FF6F9002ACE90 /* Emulation.storyboard in Resources */,
 				BFB89E4218909EE8002E5F26 /* Default-Landscape~ipad.png in Resources */,
-				BF2F35C8183FF6F9002ACE90 /* Default.gbaskin in Resources */,
 				BFB89E3E18909EE8002E5F26 /* Default-568h@2x.png in Resources */,
 				BF2F35C9183FF6F9002ACE90 /* xButton.png in Resources */,
 				BF359B9C187A6A8200B4CA53 /* eventDistributionROMs.plist in Resources */,
