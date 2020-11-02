@@ -2227,19 +2227,24 @@ typedef struct{
     [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"めあど";
         textField.text = [userDefault objectForKey:@"UD_KEY_NICO_COMMENT_VIEW_MAIL"];
+//        textField.secureTextEntry = YES;
+//        textField.text = @"mochimochi64qfp@gmail.com";
     }];
     [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"パスワード";
         textField.secureTextEntry = YES;
         textField.text = [userDefault objectForKey:@"UD_KEY_NICO_COMMENT_VIEW_PASSWORD"];
+//        textField.text = @"teresko629";
     }];
     [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Live ID";
         textField.text = [userDefault objectForKey:@"UD_KEY_NICO_COMMENT_VIEW_LIVE_ID"];
+//        textField.text = @"lv328789604";
     }];
     [al addAction:[UIAlertAction actionWithTitle:@"キャンセル"
                                                               style:UIAlertActionStyleCancel
                                                             handler:^(UIAlertAction * _Nonnull action) {
+        NSLog(@"");
     }]];
     [al addAction:[UIAlertAction actionWithTitle:@"OK"
                                                               style:UIAlertActionStyleDefault
@@ -2250,7 +2255,7 @@ typedef struct{
         info.liveId = [al.textFields objectAtIndex:2].text;
 
         [self startCommentViewWithInfo:info];
-        
+
         NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
         [userDefault setValue:info.mail forKey:@"UD_KEY_NICO_COMMENT_VIEW_MAIL"];
         [userDefault setValue:info.password forKey:@"UD_KEY_NICO_COMMENT_VIEW_PASSWORD"];
@@ -2326,15 +2331,6 @@ typedef struct{
         self.emulatorScreen.eaglView = [[GBAEmulatorCore sharedCore] eaglView];
     }
     
-    
-    {
-        
-        // login and get cookie.
-        {
-            
-        }
-    }
-    
     {
         UIView *part = self.containerView;
         UIView *inStackView = self.screenContainerView;
@@ -2374,28 +2370,34 @@ typedef struct{
                                                                                       kCFStringEncodingUTF8);
     NSString *body = [NSString stringWithFormat:@"mail=%@&password=%@", mail, password];
     request.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
-    [request setHTTPShouldHandleCookies:YES];
+    
+    
+
+    
     NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
     NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
     NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
         NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
         if (statusCode == 200) {
-            /*
-             iOSのresponse.allHeaderFieldsにCookieの一部が表示されなかった理由を調べるために、半日を費やしましたが、Androidでは（同じサービスを使用して）表示されていました。
-             これは、一部のCookieが事前に抽出され、共有Cookieストアに保存されるためです。それらはallHeaderFieldsには表示されません。
-             */
-            NSArray<NSHTTPCookie *> *urlCookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:[request URL]];
-            NSLog(@"%@", urlCookies);
+            NSArray<NSHTTPCookie *> *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies];
             NSDate *newestDate = [NSDate date];
-            size_t newestIdx = -1;
-            for(size_t i = 0; i < urlCookies.count; ++i){
-                if([newestDate compare:[[urlCookies objectAtIndex:i] expiresDate]] == NSOrderedAscending){
-                    newestDate = [[urlCookies objectAtIndex:i] expiresDate];
-                    newestIdx = i;
+            int newestIdx = -1;
+            for(size_t i = 0; i < cookies.count; ++i){
+                if([newestDate compare:[[cookies objectAtIndex:i] expiresDate]] == NSOrderedAscending){
+                    newestDate = [[cookies objectAtIndex:i] expiresDate];
+                    newestIdx = (int)i;
                 }
             }
             if(newestIdx >= 0){
-                NSString *cookie = [[urlCookies objectAtIndex:newestIdx] value];
+                
+                /*
+                 https://stackoverflow.com/questions/19066577/get-cookies-from-nshttpurlresponse/49381798
+                 iOSのresponse.allHeaderFieldsにCookieの一部が表示されなかった理由を調べるために、半日を費やしましたが、Androidでは（同じサービスを使用して）表示されていました。
+                 これは、一部のCookieが事前に抽出され、共有Cookieストアに保存されるためです。それらはallHeaderFieldsには表示されません。
+                 */
+                NSString *cookie = [[[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies] lastObject] value];
+                
+                
                 NSString *liveId = info.liveId;
                 NSString *playerGetUrl = [NSString stringWithFormat:@"http://watch.live.nicovideo.jp/api/getplayerstatus?v=%@", liveId];
                 [request setHTTPMethod:@"GET"];
@@ -2407,10 +2409,15 @@ typedef struct{
                     NSHTTPCookieValue : cookie,
                     NSHTTPCookieSecure : @NO
                 }];
-                NSDictionary *header = [NSHTTPCookie requestHeaderFieldsWithCookies:@[apiCookie]];
-//                        [request setAllHTTPHeaderFields:header];
                 [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:apiCookie];
                 NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+                    NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
+                    if(statusCode != 200) {
+                        [self processMainThread:^{
+                            [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ニコ生のサーバーでエラーが発生しています。(%d)", (int)statusCode]];
+                        }];
+                        return;
+                    }
                     std::string _xml((uint8_t *)(data.bytes), ((uint8_t *)(data.bytes) + data.length));
                     NSString *xml = [NSString stringWithUTF8String:_xml.c_str()];
                     // 改行を削除
@@ -2420,7 +2427,18 @@ typedef struct{
                     NSString *thread = [self regExWithString:xml pattern:@".*?<thread>(.+?)</thread>.*"];
                     mCommentSocket = [[RTCommentSocket alloc] init];
                     struct hostent *host = gethostbyname(addr.UTF8String);
-                    if(host == NULL){
+                    if(host == NULL || port.length > 6){
+                        NSString *errorCode = [self regExWithString:xml pattern:@".*?<code>(.+?)</code>.*"];
+                        if([errorCode isEqualToString:@"closed"]){
+                            [self processMainThread:^{
+                                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：指定した番組はすでに終了しています。(%@)", info.liveId]];
+                            }];
+                        }
+                        if([errorCode isEqualToString:@"notlogin"]){
+                            [self processMainThread:^{
+                                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ユーザー名またはパスワードが間違っています。"]];
+                            }];
+                        }
                         return;
                     }
                     char ipAddr[32];
@@ -2459,6 +2477,10 @@ typedef struct{
                     [mCommentSocket addDataWithData:api];
                 }];
                 [task resume];
+            }else{
+                [self processMainThread:^{
+                    [mLabelComment setText:@"エラー！：クッキーを取得できませんでした。"];
+                }];
             }
 
         }

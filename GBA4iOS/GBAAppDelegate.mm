@@ -58,8 +58,14 @@ static GBAAppDelegate *_appDelegate;
 
 @implementation GBAAppDelegate
 
+void uncaughtExceptionHandler(NSException *e){
+    NSLog(@"CRASH: %@",e);
+    NSLog(@"Stack Trace: %@",[e callStackSymbols]);
+}
+
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
+    NSSetUncaughtExceptionHandler(uncaughtExceptionHandler);
     _appDelegate = self;
     
     //[UIView toggleViewMainThreadChecking];

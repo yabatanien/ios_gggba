@@ -120,7 +120,7 @@
 - (void)socket:(GCDAsyncSocket *)sock didWriteDataWithTag:(long)tag
 {
     // This method is executed on the socketQueue (not the main thread)
-    NSLog(@"didWriteDataWithTag");
+//    NSLog(@"didWriteDataWithTag");
     //if (tag == ECHO_MSG){
 //    [sock readDataToData:[GCDAsyncSocket CRLFData] withTimeout:READ_TIMEOUT tag:0];
     //}
@@ -129,7 +129,7 @@
 - (void)socket:(GCDAsyncSocket *)sock didReadData:(NSData *)data withTag:(long)tag
 {
     // This method is executed on the socketQueue (not the main thread)
-    NSLog(@"didReadData");
+//    NSLog(@"didReadData");
     if(mOnData) mOnData([data mutableCopy]);
     [sock readDataWithTimeout:-1 tag:0];
 }
