@@ -48,7 +48,7 @@
 
 static GBAEmulationViewController *_emulationViewController;
 
-@interface GBAEmulationViewController () <GBAControllerInputDelegate, UIViewControllerTransitioningDelegate, GBASaveStateViewControllerDelegate, GBACheatManagerViewControllerDelegate, GBASyncingDetailViewControllerDelegate, GBAEventDistributionViewControllerDelegate, GBAEmulatorCoreDelegate, GBAROMTableViewControllerAppearanceDelegate> {
+@interface GBAEmulationViewController () <GBAControllerInputDelegate, UIViewControllerTransitioningDelegate, GBASaveStateViewControllerDelegate, GBACheatManagerViewControllerDelegate, GBASyncingDetailViewControllerDelegate, GBAEventDistributionViewControllerDelegate, GBAEmulatorCoreDelegate, GBAROMTableViewControllerAppearanceDelegate, AVSpeechSynthesizerDelegate> {
     CFAbsoluteTime _romStartTime;
     CFAbsoluteTime _romPauseTime;
     
@@ -59,6 +59,7 @@ static GBAEmulationViewController *_emulationViewController;
     AVCaptureStillImageOutput *mCameraOutput;
     AVCaptureDevice *mCameraDevice;
     UIView *mCameraView;
+    AVSpeechSynthesizer *mSpeechSynthesizer;
 }
 
 @property (strong, nonatomic) IBOutlet UIView *containerView;
@@ -113,19 +114,34 @@ static GBAEmulationViewController *_emulationViewController;
 
 @end
 
+typedef struct{
+    NSString *playerHostIpAddress;
+    int playerPort;
+    NSString *playertThread;
+    NSString *liveId;
+}NicoTempStorage;
+
+typedef struct{
+    NSMutableURLRequest *request;
+    NSURLSession *session;
+}WebApiRequestObject;
+
+typedef struct{
+    NSString *mail;
+    NSString *password;
+}NicoLoginInfo;
+
 @implementation GBAEmulationViewController{
     RTCommentSocket *mCommentSocket;
     UILabel *mLabelComment;
     NSTimer *mTimerCommentUpdateInterval;
     NSMutableArray<NSString *> *mComments;
     BOOL mFirstFetched;
+    NSMutableArray<NSString *> *mSpeechQueue;
+    NicoTempStorage mNicoTempStorage;
+    BOOL mLoggedIn;
+    WebApiRequestObject mWebApiRequestObject;
 }
-
-typedef struct{
-    NSString *mail;
-    NSString *password;
-    NSString *liveId;
-}StartCommentViewWithInfo;
 
 @synthesize mAVCaptureSession;
 
@@ -144,6 +160,10 @@ typedef struct{
         [[GBAEmulatorCore sharedCore] setDelegate:self];
         mComments = [NSMutableArray new];
         mFirstFetched = false;
+        mSpeechSynthesizer = [[AVSpeechSynthesizer alloc] init];
+        mSpeechQueue = [NSMutableArray new];
+        memset(&mNicoTempStorage, 0, sizeof(NicoTempStorage));
+        mLoggedIn = NO;
     }
     
     return self;
@@ -2219,9 +2239,49 @@ typedef struct{
     }
 }
 
--(void)onPushButtonCommentStart:(id)sender{
+
+-(void)showAlert:(NSString *)msg{
     NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
-    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"コメビュ"
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@""
+                                                                message:msg
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+    }]];
+    UIViewController *vc = [UIViewController getFrontViewController];
+    if(vc != nil){
+        [vc presentViewController:al animated:YES completion:^{
+        }];
+    }
+}
+
+-(void)onPushButtonCommentViewSetting:(id)sender{
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    BOOL currentSpeechEnable = [[userDefault objectForKey:@"UD_KEY_ENABLE_COMMENT_SPEECH"] boolValue];
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@""
+                                                                message:@""
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"キャンセル"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+    }]];
+    [al addAction:[UIAlertAction actionWithTitle:currentSpeechEnable ? @"読み上げを無効にする" :@"読み上げを有効にする"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+        [userDefault setValue:[NSNumber numberWithBool:!currentSpeechEnable] forKey:@"UD_KEY_ENABLE_COMMENT_SPEECH"];
+        [userDefault synchronize];
+    }]];
+    UIViewController *vc = [UIViewController getFrontViewController];
+    if(vc != nil){
+        [vc presentViewController:al animated:YES completion:^{
+        }];
+    }
+}
+
+-(void)onPushButtonLogin:(id)sender{
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"ログイン"
                                                                 message:@""
                                                          preferredStyle:UIAlertControllerStyleAlert];
     [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
@@ -2236,6 +2296,40 @@ typedef struct{
         textField.text = [userDefault objectForKey:@"UD_KEY_NICO_COMMENT_VIEW_PASSWORD"];
 //        textField.text = @"teresko629";
     }];
+    [al addAction:[UIAlertAction actionWithTitle:@"キャンセル"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+    }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+        NicoLoginInfo nicoLoginInfo;
+        nicoLoginInfo.mail = [al.textFields objectAtIndex:0].text;
+        nicoLoginInfo.password = [al.textFields objectAtIndex:1].text;
+
+        [self loginWithInfo:nicoLoginInfo complete:^(BOOL success, NSString *reasion) {
+            NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+            [userDefault setValue:nicoLoginInfo.mail forKey:@"UD_KEY_NICO_COMMENT_VIEW_MAIL"];
+            [userDefault setValue:nicoLoginInfo.password forKey:@"UD_KEY_NICO_COMMENT_VIEW_PASSWORD"];
+            [userDefault synchronize];
+        }];
+    }]];
+    UIViewController *vc = [UIViewController getFrontViewController];
+    if(vc != nil){
+        [vc presentViewController:al animated:YES completion:^{
+        }];
+    }
+}
+
+-(void)onPushButtonLiveSetting:(id)sender{
+    if(!mLoggedIn){
+        [self showAlert:@"ログインしてください。"];
+        return;
+    }
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"コメビュ"
+                                                                message:@""
+                                                         preferredStyle:UIAlertControllerStyleAlert];
     [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Live ID";
         textField.text = [userDefault objectForKey:@"UD_KEY_NICO_COMMENT_VIEW_LIVE_ID"];
@@ -2244,23 +2338,12 @@ typedef struct{
     [al addAction:[UIAlertAction actionWithTitle:@"キャンセル"
                                                               style:UIAlertActionStyleCancel
                                                             handler:^(UIAlertAction * _Nonnull action) {
-        NSLog(@"");
     }]];
     [al addAction:[UIAlertAction actionWithTitle:@"OK"
                                                               style:UIAlertActionStyleDefault
                                                             handler:^(UIAlertAction * _Nonnull action) {
-        StartCommentViewWithInfo info;
-        info.mail = [al.textFields objectAtIndex:0].text;
-        info.password = [al.textFields objectAtIndex:1].text;
-        info.liveId = [al.textFields objectAtIndex:2].text;
-
-        [self startCommentViewWithInfo:info];
-
-        NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
-        [userDefault setValue:info.mail forKey:@"UD_KEY_NICO_COMMENT_VIEW_MAIL"];
-        [userDefault setValue:info.password forKey:@"UD_KEY_NICO_COMMENT_VIEW_PASSWORD"];
-        [userDefault setValue:info.liveId forKey:@"UD_KEY_NICO_COMMENT_VIEW_LIVE_ID"];
-        [userDefault synchronize];
+        mNicoTempStorage.liveId = [al.textFields objectAtIndex:0].text;
+        [self getLive];
     }]];
     UIViewController *vc = [UIViewController getFrontViewController];
     if(vc != nil){
@@ -2343,19 +2426,178 @@ typedef struct{
         [part addSubview:mLabelComment];
         
         CGSize screenSize = [UIScreen mainScreen].bounds.size;
-        UIButton *btnCommentStart = [[UIButton alloc] initWithFrame:CGRectMake([UIScreen mainScreen].bounds.size.width - 200, 50, 200, 50)];
-        [btnCommentStart setTitle:@"コメビュ設定" forState:UIControlStateNormal];
-        [btnCommentStart setBackgroundColor:[UIColor blackColor]];
-        [btnCommentStart addTarget:self action:@selector(onPushButtonCommentStart:) forControlEvents:UIControlEventTouchUpInside];
-        [self.controllerView addSubview:btnCommentStart];
+        
+        UIButton *btnLogin = [[UIButton alloc] initWithFrame:CGRectMake([UIScreen mainScreen].bounds.size.width - 250, 50, 75, 50)];
+        [btnLogin setTitle:@"ログイン" forState:UIControlStateNormal];
+        [btnLogin setBackgroundColor:[UIColor blackColor]];
+        [btnLogin addTarget:self action:@selector(onPushButtonLogin:) forControlEvents:UIControlEventTouchUpInside];
+        [self.controllerView addSubview:btnLogin];
+        
+        UIButton *btnLiveSetting = [[UIButton alloc] initWithFrame:CGRectMake([UIScreen mainScreen].bounds.size.width - (250 - 80), 50, 75, 50)];
+        [btnLiveSetting setTitle:@"Live設定" forState:UIControlStateNormal];
+        [btnLiveSetting setBackgroundColor:[UIColor blackColor]];
+        [btnLiveSetting addTarget:self action:@selector(onPushButtonLiveSetting:) forControlEvents:UIControlEventTouchUpInside];
+        [self.controllerView addSubview:btnLiveSetting];
+        
+        UIButton *btnCommentSetting = [[UIButton alloc] initWithFrame:CGRectMake([UIScreen mainScreen].bounds.size.width - (250 - 80 - 80), 50, 75, 50)];
+        [btnCommentSetting setTitle:@"コメ設定" forState:UIControlStateNormal];
+        [btnCommentSetting setBackgroundColor:[UIColor blackColor]];
+        [btnCommentSetting addTarget:self action:@selector(onPushButtonCommentViewSetting:) forControlEvents:UIControlEventTouchUpInside];
+        [self.controllerView addSubview:btnCommentSetting];
     }
 }
 
--(void)startCommentViewWithInfo:(StartCommentViewWithInfo)info{
-    [mLabelComment setText:@"コメントロード中..."];
+
+-(void)speechWithString:(NSString *)str{
+    AVSpeechUtterance *utterance = [AVSpeechUtterance speechUtteranceWithString:str];
+    utterance.voice = [AVSpeechSynthesisVoice voiceWithLanguage:@"ja-JP"];
+    utterance.rate = 0.6; // 読み上げ速度
+    utterance.pitchMultiplier = 1; // 読み上げる声のピッチ
+    utterance.preUtteranceDelay = 0.2; // 読み上げるまでのため
+    [mSpeechSynthesizer speakUtterance:utterance];
+}
+
+- (void)speechSynthesizer:(AVSpeechSynthesizer *)synthesizer didFinishSpeechUtterance:(AVSpeechUtterance *)utterance{
+    NSString *str = nil;
+    @synchronized (mSpeechQueue) {
+        [mSpeechQueue removeObjectAtIndex:0];
+        while (mSpeechQueue.count > 5) {
+            [mSpeechQueue removeObjectAtIndex:0];
+        }
+        if(mSpeechQueue.count > 0){
+            str = [mSpeechQueue firstObject];
+        }
+    }
+    if(str != nil){
+        [self speechWithString:str];
+    }
+}
+
+-(void)addSpeechQueueWithString:(NSString *)str{
+    @synchronized (mSpeechQueue) {
+        [mSpeechQueue addObject:str];
+    }
+    [self speechWithString:str];
+}
+
+-(void)startCommentViewWithComplete:(void(^)(BOOL success, NSString *reasion)) onComplete{
+    [mCommentSocket connectToHost:mNicoTempStorage.playerHostIpAddress port:mNicoTempStorage.playerPort];
+    [mCommentSocket onData:^(NSData *data) {
+        std::vector<uint8_t> _res((uint8_t *)data.bytes, (uint8_t *)data.bytes + data.length);
+        std::vector<uint8_t> res;
+        for(size_t i = 0; i < _res.size(); ++i){
+            if(_res[i] != 0) res.push_back(_res[i]);
+        }
+        res.push_back(0);
+        std::string strRes(res.begin(), res.begin() + res.size());
+        NSString *result = [NSString stringWithUTF8String:strRes.c_str()];
+        result = [result stringByReplacingOccurrencesOfString:@"<chat" withString:@"\n<chat"];
+        NSArray<NSString *> *commentInfos = [result componentsSeparatedByString:@"\n"];
+        for(size_t i = 0; i < commentInfos.count; ++i){
+            if(i > 0){
+                NSString *comment = [self regExWithString:commentInfos[i] pattern:@"<chat.*?>(.+?)</chat>.*"];
+                [mComments addObject:comment];
+                if([[[NSUserDefaults standardUserDefaults] objectForKey:@"UD_KEY_ENABLE_COMMENT_SPEECH"] boolValue]){
+                    [self addSpeechQueueWithString:comment];
+                }
+            }
+        }
+        if(mComments.count > 4){
+            [mComments removeObjectAtIndex:0];
+        }
+        NSString *commentText = [mComments componentsJoinedByString:@"\n"];
+        [self processMainThread:^{
+            [mLabelComment setText:commentText];
+        }];
+    }];
+    NSString *commentGetApi = [NSString stringWithFormat:@"<thread thread=\"%@\" version=\"20061206\" res_from=\"-4\"/>", mNicoTempStorage.playertThread];
+    std::vector<char> vecCommentGetApi(commentGetApi.UTF8String, commentGetApi.UTF8String + commentGetApi.length);
+    vecCommentGetApi.push_back(0);
+    NSData *api = [[NSData alloc] initWithBytes:&vecCommentGetApi[0] length:vecCommentGetApi.size()];
+    [mCommentSocket addDataWithData:api];
+}
+
+-(void)getLive{
+    [self processMainThread:^{
+        [mLabelComment setText:[NSString stringWithFormat:@"ライブ[%@]のコメントを準備しています...", mNicoTempStorage.liveId]];
+    }];
+    
+    /*
+     https://stackoverflow.com/questions/19066577/get-cookies-from-nshttpurlresponse/49381798
+     iOSのresponse.allHeaderFieldsにCookieの一部が表示されなかった理由を調べるために、半日を費やしましたが、Androidでは（同じサービスを使用して）表示されていました。
+     これは、一部のCookieが事前に抽出され、共有Cookieストアに保存されるためです。それらはallHeaderFieldsには表示されません。
+     */
+    NSString *cookie = [[[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies] lastObject] value];
+    
+    
+    NSString *liveId = mNicoTempStorage.liveId;
+    NSString *playerGetUrl = [NSString stringWithFormat:@"http://watch.live.nicovideo.jp/api/getplayerstatus?v=%@", liveId];
+    [mWebApiRequestObject.request setURL:[NSURL URLWithString:playerGetUrl]];
+    [mWebApiRequestObject.request setHTTPMethod:@"GET"];
+    NSHTTPCookie *apiCookie = [NSHTTPCookie cookieWithProperties:@{
+        NSHTTPCookieDomain : @"nicovideo.jp",
+        NSHTTPCookiePath : @"/",
+        NSHTTPCookieName : @"user_session",
+        NSHTTPCookieValue : cookie,
+        NSHTTPCookieSecure : @NO
+    }];
+    [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:apiCookie];
+    NSURLSessionDataTask *task = [mWebApiRequestObject.session dataTaskWithRequest:mWebApiRequestObject.request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+        NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
+        if(statusCode != 200) {
+            [self processMainThread:^{
+                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ニコ生のサーバーでエラーが発生しています。(%d)", (int)statusCode]];
+            }];
+            return;
+        }
+        std::string _xml((uint8_t *)(data.bytes), ((uint8_t *)(data.bytes) + data.length));
+        NSString *xml = [NSString stringWithUTF8String:_xml.c_str()];
+        // 改行を削除
+        xml = [[xml componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] componentsJoinedByString:@" "];
+        NSString *addr = [self regExWithString:xml pattern:@".*?<addr>(.+?)</addr>.*"];
+        NSString *port = [self regExWithString:xml pattern:@".*?<port>(.+?)</port>.*"];
+        NSString *thread = [self regExWithString:xml pattern:@".*?<thread>(.+?)</thread>.*"];
+        mCommentSocket = [[RTCommentSocket alloc] init];
+        struct hostent *host = gethostbyname(addr.UTF8String);
+        if(host == NULL || port.length > 6){
+            NSString *errorCode = [self regExWithString:xml pattern:@".*?<code>(.+?)</code>.*"];
+            if([errorCode isEqualToString:@"closed"]){
+                [self processMainThread:^{
+                    [mLabelComment setText:[NSString stringWithFormat:@"エラー！：指定した番組はすでに終了しています。(%@)", mNicoTempStorage.liveId]];
+                }];
+            }
+            if([errorCode isEqualToString:@"notlogin"]){
+                [self processMainThread:^{
+                    [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ユーザー名またはパスワードが間違っています。"]];
+                }];
+            }
+            return;
+        }
+        char ipAddr[32];
+        inet_ntop(host->h_addrtype, host->h_addr, ipAddr, sizeof(ipAddr));
+        mNicoTempStorage.playerHostIpAddress = [[NSString alloc] initWithUTF8String:ipAddr];
+        mNicoTempStorage.playerPort = [port intValue];
+        mNicoTempStorage.playertThread = thread;
+        
+        [self startCommentViewWithComplete:^(BOOL success, NSString *reasion) {
+            if(success){
+                NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+                [userDefault setValue:mNicoTempStorage.liveId forKey:@"UD_KEY_NICO_COMMENT_VIEW_LIVE_ID"];
+                [userDefault synchronize];
+            }
+        }];
+    }];
+    [task resume];
+}
+
+-(void)loginWithInfo:(NicoLoginInfo)info complete:(void(^)(BOOL success, NSString *reasion)) onComplete{
+    mLoggedIn = NO;
+    [self processMainThread:^{
+        [mLabelComment setText:@"ログイン中..."];
+    }];
     NSURL *url = [NSURL URLWithString:@"https://secure.nicovideo.jp/secure/login?site=nicolive"];
-    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
-    request.HTTPMethod = @"POST";
+    mWebApiRequestObject.request = [[NSMutableURLRequest alloc] initWithURL:url];
+    mWebApiRequestObject.request.HTTPMethod = @"POST";
     NSString *mail = (__bridge NSString *)CFURLCreateStringByAddingPercentEscapes(
                                                                          NULL,
                                                                          (CFStringRef)info.mail,
@@ -2369,14 +2611,10 @@ typedef struct{
                                                                                       CFSTR("!*'();:@&=+$,/?%#[]"),
                                                                                       kCFStringEncodingUTF8);
     NSString *body = [NSString stringWithFormat:@"mail=%@&password=%@", mail, password];
-    request.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
-    
-    
-
-    
+    mWebApiRequestObject.request.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
     NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
-    NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
-    NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
+    mWebApiRequestObject.session = [NSURLSession sessionWithConfiguration:configuration];
+    NSURLSessionDataTask *task = [mWebApiRequestObject.session dataTaskWithRequest:mWebApiRequestObject.request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
         NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
         if (statusCode == 200) {
             NSArray<NSHTTPCookie *> *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies];
@@ -2389,100 +2627,23 @@ typedef struct{
                 }
             }
             if(newestIdx >= 0){
-                
-                /*
-                 https://stackoverflow.com/questions/19066577/get-cookies-from-nshttpurlresponse/49381798
-                 iOSのresponse.allHeaderFieldsにCookieの一部が表示されなかった理由を調べるために、半日を費やしましたが、Androidでは（同じサービスを使用して）表示されていました。
-                 これは、一部のCookieが事前に抽出され、共有Cookieストアに保存されるためです。それらはallHeaderFieldsには表示されません。
-                 */
-                NSString *cookie = [[[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies] lastObject] value];
-                
-                
-                NSString *liveId = info.liveId;
-                NSString *playerGetUrl = [NSString stringWithFormat:@"http://watch.live.nicovideo.jp/api/getplayerstatus?v=%@", liveId];
-                [request setHTTPMethod:@"GET"];
-                [request setURL:[NSURL URLWithString:playerGetUrl]];
-                NSHTTPCookie *apiCookie = [NSHTTPCookie cookieWithProperties:@{
-                    NSHTTPCookieDomain : @"nicovideo.jp",
-                    NSHTTPCookiePath : @"/",
-                    NSHTTPCookieName : @"user_session",
-                    NSHTTPCookieValue : cookie,
-                    NSHTTPCookieSecure : @NO
+                mLoggedIn = YES;
+                if(onComplete) onComplete(YES, @"");
+                [self processMainThread:^{
+                    [mLabelComment setText:[NSString stringWithFormat:@"%@ でログインしました。", info.mail]];
                 }];
-                [[NSHTTPCookieStorage sharedHTTPCookieStorage] setCookie:apiCookie];
-                NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
-                    NSInteger statusCode = [(NSHTTPURLResponse *)response statusCode];
-                    if(statusCode != 200) {
-                        [self processMainThread:^{
-                            [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ニコ生のサーバーでエラーが発生しています。(%d)", (int)statusCode]];
-                        }];
-                        return;
-                    }
-                    std::string _xml((uint8_t *)(data.bytes), ((uint8_t *)(data.bytes) + data.length));
-                    NSString *xml = [NSString stringWithUTF8String:_xml.c_str()];
-                    // 改行を削除
-                    xml = [[xml componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]] componentsJoinedByString:@" "];
-                    NSString *addr = [self regExWithString:xml pattern:@".*?<addr>(.+?)</addr>.*"];
-                    NSString *port = [self regExWithString:xml pattern:@".*?<port>(.+?)</port>.*"];
-                    NSString *thread = [self regExWithString:xml pattern:@".*?<thread>(.+?)</thread>.*"];
-                    mCommentSocket = [[RTCommentSocket alloc] init];
-                    struct hostent *host = gethostbyname(addr.UTF8String);
-                    if(host == NULL || port.length > 6){
-                        NSString *errorCode = [self regExWithString:xml pattern:@".*?<code>(.+?)</code>.*"];
-                        if([errorCode isEqualToString:@"closed"]){
-                            [self processMainThread:^{
-                                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：指定した番組はすでに終了しています。(%@)", info.liveId]];
-                            }];
-                        }
-                        if([errorCode isEqualToString:@"notlogin"]){
-                            [self processMainThread:^{
-                                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ユーザー名またはパスワードが間違っています。"]];
-                            }];
-                        }
-                        return;
-                    }
-                    char ipAddr[32];
-                    inet_ntop(host->h_addrtype, host->h_addr, ipAddr, sizeof(ipAddr));
-                    NSString *strIpAddr=[[NSString alloc] initWithUTF8String:ipAddr];
-                    [mCommentSocket connectToHost:strIpAddr port:[port intValue]];
-                    [mCommentSocket onData:^(NSData *data) {
-                        std::vector<uint8_t> _res((uint8_t *)data.bytes, (uint8_t *)data.bytes + data.length);
-                        std::vector<uint8_t> res;
-                        for(size_t i = 0; i < _res.size(); ++i){
-                            if(_res[i] != 0) res.push_back(_res[i]);
-                        }
-                        res.push_back(0);
-                        std::string strRes(res.begin(), res.begin() + res.size());
-                        NSString *result = [NSString stringWithUTF8String:strRes.c_str()];
-                        result = [result stringByReplacingOccurrencesOfString:@"<chat" withString:@"\n<chat"];
-                        NSArray<NSString *> *commentInfos = [result componentsSeparatedByString:@"\n"];
-                        for(size_t i = 0; i < commentInfos.count; ++i){
-                            if(i > 0){
-                                NSString *comment = [self regExWithString:commentInfos[i] pattern:@"<chat.*?>(.+?)</chat>.*"];
-                                [mComments addObject:comment];
-                            }
-                        }
-                        if(mComments.count > 4){
-                            [mComments removeObjectAtIndex:0];
-                        }
-                        NSString *commentText = [mComments componentsJoinedByString:@"\n"];
-                        [self processMainThread:^{
-                            [mLabelComment setText:commentText];
-                        }];
-                    }];
-                    NSString *commentGetApi = [NSString stringWithFormat:@"<thread thread=\"%@\" version=\"20061206\" res_from=\"-4\"/>", thread];
-                    std::vector<char> vecCommentGetApi(commentGetApi.UTF8String, commentGetApi.UTF8String + commentGetApi.length);
-                    vecCommentGetApi.push_back(0);
-                    NSData *api = [[NSData alloc] initWithBytes:&vecCommentGetApi[0] length:vecCommentGetApi.size()];
-                    [mCommentSocket addDataWithData:api];
-                }];
-                [task resume];
             }else{
+                if(onComplete) onComplete(NO, @"");
                 [self processMainThread:^{
                     [mLabelComment setText:@"エラー！：クッキーを取得できませんでした。"];
                 }];
             }
 
+        }else{
+            if(onComplete) onComplete(NO, @"");
+            [self processMainThread:^{
+                [mLabelComment setText:[NSString stringWithFormat:@"エラー！：ニコ生のサーバーでエラーが発生しています。(%d)", (int)statusCode]];
+            }];
         }
     }];
     [task resume];
