@@ -45,6 +45,7 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #import "UIViewController+Custom.h"
+#import "EmulatorAPI.h"
 
 static GBAEmulationViewController *_emulationViewController;
 
@@ -258,6 +259,16 @@ typedef struct{
         
         [self.controllerView addSubview:mCameraView];
     }
+    
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    float volume;
+    if([userDefault objectForKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"] == nil){
+        volume = 0.5;
+        [userDefault setDouble:volume forKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"];
+    }else{
+        volume = [[userDefault objectForKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"] doubleValue];
+    }
+    soundSetVolume(volume);
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -2256,6 +2267,38 @@ typedef struct{
     }
 }
 
+-(void)configSound{
+    NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
+    float volume = [[userDefault objectForKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"] boolValue];
+    UIAlertController *al = [UIAlertController alertControllerWithTitle:@"音量"
+                                                                message:@"0〜100 の範囲で入力してください。"
+                                                         preferredStyle:UIAlertControllerStyleAlert];
+    [al addAction:[UIAlertAction actionWithTitle:@"キャンセル"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+    }]];
+    [al addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
+        [textField setKeyboardType:UIKeyboardTypeNumberPad];
+        textField.text = [NSString stringWithFormat:@"%d", (int)([[userDefault objectForKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"] doubleValue] * 100)];
+    }];
+    [al addAction:[UIAlertAction actionWithTitle:@"適用"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+        NSString *strVol = [al.textFields objectAtIndex:0].text;
+        int val = [strVol intValue];
+        if(val < 0) val = 0;
+        if(val > 100) val = 100;
+        double volume = (double)val / 100.0;
+        [userDefault setDouble:volume forKey:@"UD_KEY_EMULATOR_SOUND_VOLUME"];
+        EmulatorAPISetVolime(volume);
+    }]];
+    UIViewController *vc = [UIViewController getFrontViewController];
+    if(vc != nil){
+        [vc presentViewController:al animated:YES completion:^{
+        }];
+    }
+}
+
 -(void)onPushButtonCommentViewSetting:(id)sender{
     NSUserDefaults *userDefault = [NSUserDefaults standardUserDefaults];
     BOOL currentSpeechEnable = [[userDefault objectForKey:@"UD_KEY_ENABLE_COMMENT_SPEECH"] boolValue];
@@ -2271,6 +2314,11 @@ typedef struct{
                                                             handler:^(UIAlertAction * _Nonnull action) {
         [userDefault setValue:[NSNumber numberWithBool:!currentSpeechEnable] forKey:@"UD_KEY_ENABLE_COMMENT_SPEECH"];
         [userDefault synchronize];
+    }]];
+    [al addAction:[UIAlertAction actionWithTitle:@"ゲーム音量設定"
+                                                              style:UIAlertActionStyleDefault
+                                                            handler:^(UIAlertAction * _Nonnull action) {
+        [self configSound];
     }]];
     UIViewController *vc = [UIViewController getFrontViewController];
     if(vc != nil){
